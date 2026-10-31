@@ -361,13 +361,30 @@ function cleanBrief(raw: string) {
   return t.length > 80 ? t.slice(0, 80) : t;
 }
 
-export async function describeSticker(blobId: string, grokModelId?: string) {
+export function wechatRoute(chat: Chat): Record<string, unknown> {
+  const pick = chat.wechatAi;
+  if (!pick?.accountId) return { grokModelId: chat.grokModelId };
+  const account = (useApp.getState().settings.llmAccounts ?? []).find((a) => a.id === pick.accountId);
+  const starred = account?.starred ?? [];
+  if (!account) {
+    useApp.getState().patchChat(chat.id, { wechatAi: undefined });
+    throw new Error("这个账号已经不在了，请重选");
+  }
+  if (!pick.model) throw new Error("请先选择模型");
+  if (!starred.includes(pick.model)) {
+    useApp.getState().patchChat(chat.id, { wechatAi: undefined });
+    throw new Error("这个模型不在收藏里了，请重选");
+  }
+  return { via: "api", model: pick.model, baseUrl: account.base, apiKey: account.key };
+}
+
+export async function describeSticker(blobId: string, grokModelId?: string, route?: Record<string, unknown> | null) {
   const url = await blobDataUrl(blobId);
   if (!url) throw new Error("这张图已经不在了");
   const text = await grokOnce({
     task: "wechat",
     extraSystem: STICKER_BRIEF_SYSTEM,
-    grokModelId,
+    ...(route ?? { grokModelId }),
     max_tokens: 200,
     messages: [
       {
@@ -393,12 +410,12 @@ export function enqueueStickerBrief<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-export function queueStickerBrief(blobId: string, grokModelId?: string) {
+export function queueStickerBrief(blobId: string, grokModelId?: string, route?: Record<string, unknown> | null) {
   void enqueueStickerBrief(async () => {
     const row = useApp.getState().wechatStickers.find((s) => s.blobId === blobId);
     if (!row || row.brief.trim()) return;
     try {
-      const brief = await describeSticker(blobId, grokModelId);
+      const brief = await describeSticker(blobId, grokModelId, route);
       if (!brief) return;
       const now = useApp.getState().wechatStickers;
       const hit = now.find((s) => s.blobId === blobId);
@@ -528,10 +545,11 @@ async function maybeFold(chatId: string, signal?: AbortSignal) {
   const body = [session.earlier.trim(), ...chunk.flat().map((line) => lineText(line, true))].filter(Boolean).join("\n");
   if (!body.trim()) return;
   try {
+    const host = useApp.getState().chats.find((c) => c.id === chatId);
     const text = await grokOnce({
       task: "wechat",
       extraSystem: FOLD_SYSTEM,
-      grokModelId: useApp.getState().chats.find((c) => c.id === chatId)?.grokModelId,
+      ...(host ? wechatRoute(host) : {}),
       messages: [{ role: "user", content: body }],
       max_tokens: 500,
     }, signal);
@@ -647,7 +665,7 @@ async function completeReply(chat: Chat, turn: WechatLine, armed: boolean, onTex
     task: "wechat",
     extraSystem: [REPLY_SYSTEM, inline ? wechatImageTail(chat, prevScene) : ""].filter(Boolean).join("\n\n"),
     ...wechatPresetStyle(settings, chat, inline),
-    grokModelId: chat.grokModelId,
+    ...wechatRoute(chat),
     messages: await replyMessages(chat, live, stickers, turns),
     max_tokens: wechatMaxTokens(inline ? 1800 : 800),
   }, signal);
@@ -878,7 +896,7 @@ async function foldRoom(chat: Chat, key: string, signal?: AbortSignal) {
     const text = await grokOnce({
       task: "wechat",
       extraSystem: FOLD_SYSTEM,
-      grokModelId: chat.grokModelId,
+      ...wechatRoute(chat),
       messages: [{ role: "user", content: body }],
       max_tokens: 400,
     }, signal);
@@ -968,7 +986,7 @@ async function completeMulti(chat: Chat, key: string, turn: WechatLine, armed: b
       .filter(Boolean)
       .join("\n\n"),
     ...wechatPresetStyle(settings, chat, inline, group),
-    grokModelId: chat.grokModelId,
+    ...wechatRoute(chat),
     messages: await multiMessages(chat, { ...live, rooms: { ...live.rooms, [key]: room } }, key, stickers, turns),
     max_tokens: wechatMaxTokens(group ? 1200 + Math.max(1, chat.characters.length) * 900 + (inline ? 600 : 0) : inline ? 2200 : 800),
   }, signal);
@@ -1403,7 +1421,7 @@ export async function paintWechat(
         .filter(Boolean)
         .join("\n\n");
       const cast = group ? "all" : wechatIsMulti(live) ? "solo" : undefined;
-      const tags = await writeImageTags(live, "", live.grokModelId, shot, previousWechatPrompt(now, lineId), ac.signal, user?.text || "", cast);
+      const tags = await writeImageTags(live, "", live.grokModelId, shot, previousWechatPrompt(now, lineId), ac.signal, user?.text || "", cast, wechatRoute(live));
       grokTail = tags.base;
       charTails = tags.chars;
       if (tags.presence && !wechatIsMulti(live)) {
@@ -1479,7 +1497,7 @@ export async function summarizeWechat(chat: Chat, session: WechatSession) {
     const raw = await grokOnce({
       task: "wechat",
       extraSystem: SUMMARY_SYSTEM,
-      grokModelId: chat.grokModelId,
+      ...wechatRoute(chat),
       messages: [{ role: "user", content: blocks.join("\n\n") || "（没有内容）" }],
       max_tokens: 700,
     });
@@ -1492,7 +1510,7 @@ export async function summarizeWechat(chat: Chat, session: WechatSession) {
   const raw = await grokOnce({
     task: "wechat",
     extraSystem: SUMMARY_SYSTEM,
-    grokModelId: chat.grokModelId,
+    ...wechatRoute(chat),
     messages: [
       {
         role: "user",

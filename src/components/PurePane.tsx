@@ -18,12 +18,32 @@ type GenPhase = "uploading" | "generating" | "receiving" | "waiting" | null;
 let drawing = false;
 let drawAbort: AbortController | null = null;
 let queue: { ac: AbortController; left: number } | null = null;
+let phase: GenPhase = null;
+const phaseListeners = new Set<(v: GenPhase) => void>();
+
+function setDrawPhase(next: GenPhase) {
+  phase = next;
+  for (const fn of phaseListeners) fn(next);
+}
+
+function useDrawPhase() {
+  const [value, setValue] = useState(phase);
+  useEffect(() => {
+    phaseListeners.add(setValue);
+    setValue(phase);
+    return () => {
+      phaseListeners.delete(setValue);
+    };
+  }, []);
+  return value;
+}
 
 export function cancelPureDraw() {
   queue?.ac.abort();
   queue = null;
   drawAbort?.abort();
   drawing = false;
+  setDrawPhase(null);
 }
 
 export function PurePane() {
@@ -34,7 +54,7 @@ export function PurePane() {
   const [viewId, setViewId] = useState<string | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const [phase, setPhase] = useState<GenPhase>(null);
+  const phase = useDrawPhase();
   const [flipLock, setFlipLock] = useState(false);
   const [peekId, setPeekId] = useState<string | null>(null);
   const [multiOpen, setMultiOpen] = useState(false);
@@ -103,16 +123,14 @@ export function PurePane() {
   const tapDraw = () => {
     if (phase || drawing) {
       cancelPureDraw();
-      setPhase(null);
       return;
     }
-    beginQueue(setPhase, showDrawn);
+    beginQueue(showDrawn);
   };
   const startFromDialog = () => {
     setMultiOpen(false);
     cancelPureDraw();
-    setPhase(null);
-    beginQueue(setPhase, showDrawn);
+    beginQueue(showDrawn);
   };
 
   return (
@@ -173,7 +191,7 @@ export function PurePane() {
           <Bookmark className="size-5" />
         </IconBtn>
         <DrawPress
-          className="inline-flex h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-primary px-5 text-[15px] font-medium text-on-primary shadow-[0_6px_16px_rgb(156_83_72/0.25)]"
+          className="inline-flex h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-primary px-5 text-[15px] font-medium text-on-primary shadow-[0_6px_16px_color-mix(in_srgb,var(--color-primary)_25%,transparent)]"
           onTap={tapDraw}
           onHold={() => setMultiOpen(true)}
         >
@@ -1493,7 +1511,6 @@ function ReadMeta() {
 
 async function drawOneImage(
   ac: AbortController,
-  setPhase: (v: GenPhase) => void,
   showId: (id: string) => void,
 ): Promise<"ok" | "fail" | "cancel"> {
   const params = useApp.getState().pureParams;
@@ -1507,7 +1524,7 @@ async function drawOneImage(
   if (ac.signal.aborted) return "cancel";
   const seed = params.seedLocked && params.seed != null ? params.seed : randomSeed();
   drawAbort = ac;
-  setPhase("uploading");
+  setDrawPhase("uploading");
   await afterPaint();
   try {
     const result = await generateNai({
@@ -1518,10 +1535,10 @@ async function drawOneImage(
       baseUrl: auth.baseUrl,
       mode: auth.mode,
       signal: ac.signal,
-      onStart: () => setPhase("generating"),
+      onStart: () => setDrawPhase("generating"),
       onReceiving: () => {
         if (auth.mode === "proxy") useApp.getState().setCooldown(Date.now() + COOLDOWN_MS);
-        setPhase("receiving");
+        setDrawPhase("receiving");
       },
     });
     const rec: HistoryItem = {
@@ -1548,10 +1565,7 @@ async function drawOneImage(
   }
 }
 
-function beginQueue(
-  setPhase: (v: GenPhase) => void,
-  showId: (id: string) => void,
-) {
+function beginQueue(showId: (id: string) => void) {
   const settings = useApp.getState().settings;
   const infinite = settings.multiDrawInfinite === true;
   const exactOn = !infinite && settings.multiDrawExactOn === true;
@@ -1561,26 +1575,24 @@ function beginQueue(
   const ac = new AbortController();
   queue = { ac, left: infinite ? Number.POSITIVE_INFINITY : count };
   drawing = true;
-  void runQueue(setPhase, showId);
+  setDrawPhase("uploading");
+  void runQueue(showId);
 }
 
-async function runQueue(
-  setPhase: (v: GenPhase) => void,
-  showId: (id: string) => void,
-) {
+async function runQueue(showId: (id: string) => void) {
   const mine = queue;
   if (!mine) return;
   try {
     while (queue === mine && mine.left > 0 && !mine.ac.signal.aborted) {
       if (mine.left !== Number.POSITIVE_INFINITY) mine.left -= 1;
       const auth = naiDrawAuth(useApp.getState().settings);
-      const result = await drawOneImage(mine.ac, setPhase, showId);
+      const result = await drawOneImage(mine.ac, showId);
       if (result !== "ok" || queue !== mine || mine.ac.signal.aborted) break;
       if (mine.left <= 0) break;
       if (auth?.mode === "proxy") {
         const until = useApp.getState().settings.cooldownUntil;
         if (until - Date.now() > 3000) {
-          setPhase("waiting");
+          setDrawPhase("waiting");
           await waitCooldown(mine.ac.signal);
         }
       }
@@ -1590,7 +1602,7 @@ async function runQueue(
       queue = null;
       drawing = false;
       drawAbort = null;
-      setPhase(null);
+      setDrawPhase(null);
     }
   }
 }

@@ -46,6 +46,7 @@ function keptImageIds(dump: AppDataDump) {
   }
   for (const chat of dump.chats ?? []) {
     addId(ids, chat.customAvatarBlobId);
+    addId(ids, chat.bgImageId);
     for (const c of chat.characters ?? []) {
       addId(ids, c.lookBlobId);
       addId(ids, c.wechatAvatarBlobId);
@@ -60,6 +61,7 @@ function keptImageIds(dump: AppDataDump) {
   for (const shots of Object.values(dump.composerShots ?? {})) {
     for (const shot of shots ?? []) addId(ids, shot.blobId);
   }
+  addId(ids, dump.settings?.look?.bgImageId);
   return ids;
 }
 
@@ -136,6 +138,8 @@ export async function exportArchive(kind: "full" | "lite" | "partial") {
   };
 
   if (kind === "lite") {
+    if (dump.settings?.look) dump.settings = { ...dump.settings, look: { ...dump.settings.look, bgImageId: undefined } };
+    dump.chats = (dump.chats ?? []).map((c) => ({ ...c, bgImageId: undefined }));
     dump.favorites = (dump.favorites ?? []).map((f) => ({ ...f, blobId: undefined }));
     dump.history = (dump.history ?? []).map((h) => ({ ...h, blobId: undefined }));
     dump.composerShots = {};

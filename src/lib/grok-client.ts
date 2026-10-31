@@ -44,24 +44,29 @@ async function grokOnceRaw(body: Record<string, unknown>, signal?: AbortSignal) 
   const presetOn = Boolean(s.stActiveId);
   const viaBody = body.via;
   const modelBody = typeof body.model === "string" ? body.model : "";
+  const baseBody = typeof body.baseUrl === "string" ? body.baseUrl : "";
+  const keyBody = typeof body.apiKey === "string" ? body.apiKey : "";
   const rest = { ...body };
   delete rest.via;
   delete rest.model;
+  delete rest.baseUrl;
+  delete rest.apiKey;
   const via = viaBody === "api" || viaBody === "grok" ? viaBody : s.chatSource;
   const ownParams = rest.params && typeof rest.params === "object" ? (rest.params as Record<string, unknown>) : null;
   const maxFromOwn = typeof ownParams?.maxTokens === "number" ? ownParams.maxTokens : undefined;
 
   if (via === "api") {
     const model = modelBody || s.llmModel;
-    if (!s.llmKey) throw new Error("还没连接对话 API");
+    const apiKey = keyBody || s.llmKey;
+    if (!apiKey) throw new Error("还没连接对话 API");
     if (!model) throw new Error("还没选择模型");
     const res = await fetch("/api/llm", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "chat",
-        baseUrl: s.llmBase,
-        apiKey: s.llmKey,
+        baseUrl: baseBody || s.llmBase,
+        apiKey,
         model,
         ...rest,
         params: ownParams ?? s.llmParams,
@@ -132,9 +137,12 @@ async function grokStreamRaw(
   if (signal?.aborted) throw abortError();
   const s = useApp.getState().settings;
   const api = (body.via === "api" || body.via === "grok" ? body.via : s.chatSource) === "api";
+  const baseBody = typeof body.baseUrl === "string" ? body.baseUrl : "";
+  const keyBody = typeof body.apiKey === "string" ? body.apiKey : "";
   const presetOn = Boolean(s.stActiveId);
   if (api) {
-    if (!s.llmConnected || !s.llmKey) throw new Error("还没连接对话 API");
+    const apiKey = keyBody || s.llmKey;
+    if (!apiKey) throw new Error("还没连接对话 API");
     if (!s.llmModel && typeof body.model !== "string") throw new Error("还没选择模型");
   }
 
@@ -144,8 +152,8 @@ async function grokStreamRaw(
   const payload = api
     ? {
         action: "chat",
-        baseUrl: s.llmBase,
-        apiKey: s.llmKey,
+        baseUrl: baseBody || s.llmBase,
+        apiKey: keyBody || s.llmKey,
         model: typeof body.model === "string" ? body.model : s.llmModel,
         ...body,
         params: ownParams ?? s.llmParams,

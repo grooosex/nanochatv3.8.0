@@ -1,3 +1,4 @@
+import type { LookSettings, LookTheme } from "./look";
 import type { RandomBank } from "./random-prompt";
 
 export type TabId = "chat" | "params" | "pure";
@@ -166,6 +167,11 @@ export interface WechatRoom {
   pending: WechatAttach[];
 }
 
+export interface WechatAi {
+  accountId: string;
+  model: string;
+}
+
 export interface WechatSession {
   charId: string;
   lines: WechatLine[];
@@ -245,6 +251,13 @@ export interface Chat {
   imageModelId?: string | null;
   /** @deprecated lifted into Settings.imageModelPin */
   imageModelPin?: string | null;
+  /** 这一个聊天自己的背景图。有它就盖过总设置，铺在人设、正文、生图参数。 */
+  bgImageId?: string;
+  bgFade?: number;
+  /** 这个聊天正文要不要纯色底。没设过就跟总设置。 */
+  textPlate?: boolean;
+  /** 微信单独用的账号和模型。没有就是跟主聊天一样。 */
+  wechatAi?: WechatAi;
 }
 
 export interface Folder {
@@ -433,6 +446,9 @@ export interface Settings {
   multiDrawExactOn?: boolean;
   /** 生图提示词里的随机模块。关着时符号当普通字。 */
   random?: RandomBank;
+  /** 聊天正文的字和整张纸的颜色。不进模型。 */
+  look?: LookSettings;
+  lookThemes?: LookTheme[];
 }
 
 export interface AppDataDump {

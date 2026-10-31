@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState, type PointerEvent as PE, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, Download, Loader2, Maximize2, Minus, Minimize2, Pencil, Plus, RefreshCw, Smile, Sparkles, Trash2, Wand2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, Download, Loader2, Maximize2, Minus, Minimize2, Pencil, Plus, RefreshCw, Settings, Smile, Sparkles, Trash2, Wand2, X } from "lucide-react";
 import { getImage, imageUrl } from "@/lib/idb";
 import { genPhaseLabel } from "@/lib/image-status";
 import { modelLabel, samplerLabel } from "@/lib/nai";
 import { extractGrokTail } from "@/lib/nai-tags";
 import { compressRef, isImageFile } from "@/lib/ref-image";
 import { saveBlob, useApp } from "@/lib/store";
-import type { Chat, GenImage, WechatAttach, WechatLine, WechatLog, WechatSession, WechatSticker } from "@/lib/types";
-import { emptyWechatSession, ensureMultiSession, describeSticker, lineImages, paintWechat, queueStickerBrief, regenWechat, regenContinueFrom, sendWechat, continueWechat, sessionHasLines, summarizeWechat, WECHAT_GROUP, wechatIsMulti, wechatTurnText, cancelWechatImage } from "@/lib/wechat";
+import type { Chat, GenImage, LlmAccount, WechatAttach, WechatLine, WechatLog, WechatSession, WechatSticker } from "@/lib/types";
+import { emptyWechatSession, ensureMultiSession, describeSticker, lineImages, paintWechat, queueStickerBrief, regenWechat, regenContinueFrom, sendWechat, continueWechat, sessionHasLines, summarizeWechat, WECHAT_GROUP, wechatIsMulti, wechatTurnText, cancelWechatImage, wechatRoute } from "@/lib/wechat";
 import { autoScrollNearEdge, downloadBlob, indexFromY, moveId, nearestScroller, uid } from "@/lib/utils";
 import { ImagePick } from "./ImagePick";
 import { ChatAvatar, useCooldown } from "./ui-kit";
@@ -76,6 +76,7 @@ function WechatLive({ chat, session }: { chat: Chat; session: WechatSession }) {
   const [full, setFull] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
   const [book, setBook] = useState(false);
+  const [apiOpen, setApiOpen] = useState(false);
   const [editFrom, setEditFrom] = useState<string | null>(null);
   const [editBackup, setEditBackup] = useState<{ room: string; draft: string; pending: WechatAttach[] } | null>(null);
 
@@ -221,6 +222,7 @@ function WechatLive({ chat, session }: { chat: Chat; session: WechatSession }) {
         setFull(false);
         patch({ minimized: true });
       }}
+      onGear={() => setApiOpen(true)}
       scrollRef={scroller}
       overlay={
         ask ? (
@@ -403,7 +405,11 @@ function WechatLive({ chat, session }: { chat: Chat; session: WechatSession }) {
               }}
               onAddSticker={(blobId) => {
                 useApp.getState().setWechatStickers([...useApp.getState().wechatStickers, { blobId, brief: "" }]);
-                queueStickerBrief(blobId, chat.grokModelId);
+                try {
+                  queueStickerBrief(blobId, chat.grokModelId, wechatRoute(chat));
+                } catch (e) {
+                  useApp.getState().toast(e instanceof Error ? e.message : "请重选模型");
+                }
               }}
               onOpenBook={() => setBook(true)}
             />
@@ -413,10 +419,11 @@ function WechatLive({ chat, session }: { chat: Chat; session: WechatSession }) {
     >
       {book
         ? createPortal(
-            <StickerBook grokModelId={chat.grokModelId} onClose={() => setBook(false)} />,
+            <StickerBook chat={chat} grokModelId={chat.grokModelId} onClose={() => setBook(false)} />,
             document.body,
           )
         : null}
+      {apiOpen ? <WechatApiDialog chat={chat} onClose={() => setApiOpen(false)} /> : null}
       <Thread
         chat={chat}
         name={name}
@@ -556,6 +563,115 @@ function readRoomTabs(chat: Chat, log: WechatLog) {
   return tabs;
 }
 
+const EMPTY_ACCOUNTS: LlmAccount[] = [];
+
+function WechatApiDialog({ chat, onClose }: { chat: Chat; onClose: () => void }) {
+  const accounts = useApp((s) => s.settings.llmAccounts) ?? EMPTY_ACCOUNTS;
+  const pick = chat.wechatAi;
+  const account = accounts.find((a) => a.id === pick?.accountId);
+  const [open, setOpen] = useState<null | "account" | "model">(null);
+  const models = account?.starred ?? [];
+  const chooseAccount = (id: string | null) => {
+    if (!id) useApp.getState().patchChat(chat.id, { wechatAi: undefined });
+    else {
+      const next = accounts.find((a) => a.id === id);
+      const keep = pick?.model && next?.starred?.includes(pick.model) ? pick.model : "";
+      useApp.getState().patchChat(chat.id, { wechatAi: { accountId: id, model: keep } });
+    }
+    setOpen(null);
+  };
+  return createPortal(
+    <div className="fixed inset-0 z-[90] flex items-start justify-center px-6 pt-[22vh]">
+      <button type="button" className="absolute inset-0 bg-black/40" aria-label="关闭" onClick={onClose} />
+      <div className="relative h-[210px] w-full max-w-sm overflow-visible rounded-[24px] bg-[#F7F7F7] text-black shadow-2xl">
+        <div className="flex items-center px-4 pb-2 pt-4">
+          <h2 className="min-w-0 flex-1 text-[18px] font-semibold">微信 API 设置</h2>
+          <button type="button" className="grid size-8 place-items-center" aria-label="关闭" onClick={onClose}>
+            <X className="size-5" />
+          </button>
+        </div>
+        <div className="px-4">
+          <ApiDrawer title="账号列表" label={account?.name || "与主聊天一致"} open={open === "account"} onToggle={() => setOpen(open === "account" ? null : "account")}>
+            <DrawerRow on={!pick?.accountId} onClick={() => chooseAccount(null)}>与主聊天一致</DrawerRow>
+            {accounts.map((a) => (
+              <DrawerRow key={a.id} on={a.id === pick?.accountId} onClick={() => chooseAccount(a.id)}>
+                {a.name || "未命名"}
+              </DrawerRow>
+            ))}
+            {accounts.length === 0 ? <div className="px-4 py-3 text-[13px] text-neutral-500">还没有保存的账号</div> : null}
+          </ApiDrawer>
+          <ApiDrawer
+            title="模型列表"
+            label={!account ? "先选账号" : pick?.model || "请选择"}
+            open={open === "model"}
+            dim={!account}
+            onToggle={() => {
+              if (!account) {
+                useApp.getState().toast("先选一个账号");
+                return;
+              }
+              setOpen(open === "model" ? null : "model");
+            }}
+          >
+            {models.length === 0 ? (
+              <div className="px-4 py-3 text-[13px] text-neutral-500">先去主设置收藏</div>
+            ) : (
+              models.map((m) => (
+                <DrawerRow
+                  key={m}
+                  on={m === pick?.model}
+                  onClick={() => {
+                    useApp.getState().patchChat(chat.id, { wechatAi: { accountId: account!.id, model: m } });
+                    setOpen(null);
+                  }}
+                >
+                  {m}
+                </DrawerRow>
+              ))
+            )}
+          </ApiDrawer>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function ApiDrawer({
+  title,
+  label,
+  open,
+  dim,
+  onToggle,
+  children,
+}: {
+  title: string;
+  label: string;
+  open: boolean;
+  dim?: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="relative mb-3">
+      <button type="button" className="flex h-11 w-full items-center rounded-full bg-white px-4 text-left" onClick={onToggle}>
+        <span className="w-20 shrink-0 text-[14px]">{title}</span>
+        <span className={`min-w-0 flex-1 truncate text-right text-[13px] ${dim ? "text-neutral-400" : ""}`}>{label}</span>
+        <ChevronDown className={`ml-2 size-4 shrink-0 ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open ? <div className="absolute left-0 right-0 top-12 z-20 max-h-44 overflow-y-auto rounded-2xl bg-white py-1 shadow-lg">{children}</div> : null}
+    </div>
+  );
+}
+
+function DrawerRow({ children, on, onClick }: { children: ReactNode; on?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" className={`block h-11 w-full truncate px-4 text-left text-[14px] ${on ? "text-primary" : ""}`} onClick={onClick}>
+      {children}
+    </button>
+  );
+}
+
 function Shell({
   title,
   onClose,
@@ -566,6 +682,7 @@ function Shell({
   full,
   onFull,
   onMinimize,
+  onGear,
 }: {
   title: string;
   onClose: () => void;
@@ -576,6 +693,7 @@ function Shell({
   full?: boolean;
   onFull?: () => void;
   onMinimize?: () => void;
+  onGear?: () => void;
 }) {
   const node = (
     <div className={full ? "fixed inset-0 z-[80] flex bg-[#EDEDED]" : "absolute inset-0 z-30 flex justify-center bg-black/40 px-4 py-8"}>
@@ -589,7 +707,17 @@ function Shell({
               <Minus className="size-5" />
             </button>
           ) : null}
-          <div className="w-full text-center text-[16px] font-medium">{title}</div>
+          <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center">
+            <span />
+            <span className="truncate text-center text-[16px] font-medium">{title}</span>
+            <span className="flex items-center justify-start pl-1">
+              {onGear ? (
+                <button type="button" className="grid size-4 place-items-center" aria-label="微信 API 设置" onClick={onGear}>
+                  <Settings className="size-4" />
+                </button>
+              ) : null}
+            </span>
+          </div>
           <button type="button" className="absolute right-4" aria-label="关闭" onClick={onClose}>
             <X className="size-5" />
           </button>
@@ -1097,7 +1225,7 @@ function GripBars() {
   );
 }
 
-function StickerBook({ grokModelId, onClose }: { grokModelId?: string; onClose: () => void }) {
+function StickerBook({ chat, grokModelId, onClose }: { chat?: Chat; grokModelId?: string; onClose: () => void }) {
   const saved = useApp((s) => s.wechatStickers);
   const [rows, setRows] = useState<WechatSticker[]>(() => saved.map((s) => ({ ...s })));
   const [sortMode, setSortMode] = useState(false);
@@ -1193,7 +1321,16 @@ function StickerBook({ grokModelId, onClose }: { grokModelId?: string; onClose: 
     if (busyId) return;
     setBusyId(blobId);
     touched.current.add(blobId);
-    void describeSticker(blobId, grokModelId)
+    let route: Record<string, unknown> | null = null;
+    if (chat) {
+      try {
+        route = wechatRoute(chat);
+      } catch {
+        setBusyId((id) => (id === blobId ? null : id));
+        return;
+      }
+    }
+    void describeSticker(blobId, grokModelId, route)
       .then((brief) => {
         if (!brief) return;
         setRows((cur) => cur.map((s) => (s.blobId === blobId ? { ...s, brief } : s)));

@@ -10,6 +10,8 @@ import {
   moduleTag,
   jumpSeq,
   parseRandomBank,
+  reviveAppearanceModule,
+  deleteRandomGroup,
   seqTurnItem,
   setModulePick,
   setModuleRounds,
@@ -220,6 +222,28 @@ test("deleting the appearance module stays deleted until a new character is save
   const parsed = parseRandomBank(dismissed);
   assert.equal(parsed.appearanceModuleDismissed, true);
   assert.equal(syncAppearanceModule(parsed, looks, "ensure").modules.length, 0);
+});
+
+test("opening random settings puts a deleted linked module back at the root", () => {
+  const made = syncAppearanceModule({ enabled: false, modules: [], comboLast: {} }, looks, "ensure");
+  const linked = made.modules[0];
+  const bank: RandomBank = {
+    ...made,
+    appearanceModuleDismissed: true,
+    groups: [{ id: "g1", name: "衣服", parentId: null, collapsed: true, order: 0 }],
+    modules: [{ ...linked, groupId: "g1" }],
+  };
+  const gone = deleteRandomGroup(bank, "g1");
+  assert.equal(gone.modules.length, 0);
+  assert.equal(gone.appearanceModuleDismissed, true);
+  const back = reviveAppearanceModule(gone, looks);
+  const mod = back.modules.find((m) => m.linked === "appearances");
+  assert.equal(mod?.groupId, null);
+  assert.equal(mod?.items.length, 2);
+  assert.equal(back.appearanceModuleDismissed, false);
+  const kept = parseRandomBank(bank);
+  assert.equal(kept.groups?.[0].name, "衣服");
+  assert.equal(kept.modules[0].groupId, "g1");
 });
 
 test("a hand-made module named 角色 is not taken over", () => {

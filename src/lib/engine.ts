@@ -349,6 +349,7 @@ export async function writeImageTags(
   signal?: AbortSignal,
   turnUser?: string,
   cast?: "solo" | "all",
+  route?: Record<string, unknown> | null,
 ) {
   const view = cast === "solo" ? { ...chat, isMulti: false } : chat;
   const extra = [
@@ -374,7 +375,8 @@ export async function writeImageTags(
     ...imageWriteFields(imageModelId),
     ...imagePresetStyle(useApp.getState().settings, chat),
   };
-  if (!dest.split) payload.grokModelId = grokModelId;
+  if (route?.via === "api") Object.assign(payload, route);
+  else if (!dest.split) payload.grokModelId = grokModelId;
   const text = await grokOnce(payload, withImageTimeout(signal));
   return parseImageTagOutput(replyStoryText(text), view, cast === "all");
 }

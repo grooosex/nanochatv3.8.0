@@ -27,6 +27,8 @@ import { downloadBlob, cn } from "@/lib/utils";
 import { foldWindow, genPhaseLabel, stripStatus } from "@/lib/engine";
 import { memoryCaughtUp } from "@/lib/chat-memory";
 import { splitDialogue, stripSpeakerPrefix } from "@/lib/rp-text";
+import { fontStack, readLook, sayWeight } from "@/lib/look";
+import { SceneBackdrop } from "./LookSheet";
 import { parseReplyMarkup, type ReplyFold } from "@/lib/reply-markup";
 import type { Chat, ChatMessage, GenImage, ImageGenSource, MultiMode, PromptInsertMode, UserShot } from "@/lib/types";
 import { CHAT_SHOT_MAX, messageShots } from "@/lib/user-markup";
@@ -146,7 +148,9 @@ export function ChatPane({ chat }: { chat: Chat }) {
         )}
       </div>
 
-      <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 scroll-thin">
+      <div className="relative z-[1] min-h-0 flex-1">
+        <ChatScene chat={chat} />
+        <div ref={scroller} onScroll={onScroll} className="relative z-[1] h-full overflow-y-auto px-4 pb-4 scroll-thin">
         {chat.messages.length === 0 && (
           <div className="mx-auto mt-6 max-w-md rounded-2xl bg-card px-4 py-4 text-[13px] leading-7 text-primary">
             <p>聊天：在输入框里写完点发送即可。</p>
@@ -171,6 +175,7 @@ export function ChatPane({ chat }: { chat: Chat }) {
             onEditUser={m.role === "user" ? () => startUserEdit(m) : undefined}
           />
         ))}
+        </div>
       </div>
 
       <div className="shrink-0 bg-bg px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pt-1">
@@ -545,7 +550,7 @@ function Bubble({
             className="serif-body min-h-[120px] w-full resize-y bg-transparent text-[16px] leading-relaxed text-narrate outline-none"
           />
         ) : (
-          <ReplyView text={msg.content} names={names} onUseOption={onUseOption} />
+          <ReplyView text={msg.content} names={names} onUseOption={onUseOption} chat={chat} />
         )}
         {edit ? (
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -588,10 +593,12 @@ function ReplyView({
   text,
   names,
   onUseOption,
+  chat,
 }: {
   text: string;
   names: (string | undefined)[];
   onUseOption?: (text: string) => void;
+  chat: Chat;
 }) {
   const parsed = parseReplyMarkup(text);
   const think = parsed.folds.filter((f) => f.kind === "think");
@@ -601,7 +608,7 @@ function ReplyView({
       {think.map((f, i) => (
         <ReplyFoldRow key={`think-${i}-${f.title}`} fold={f} />
       ))}
-      {parsed.body ? <RpBody text={parsed.body} names={names} /> : null}
+      {parsed.body ? <RpBody text={parsed.body} names={names} chat={chat} /> : null}
       {notes.map((f, i) => (
         <ReplyFoldRow key={`note-${i}-${f.title}`} fold={f} />
       ))}
@@ -642,15 +649,33 @@ function ReplyFoldRow({ fold }: { fold: ReplyFold }) {
   );
 }
 
-function RpBody({ text, names }: { text: string; names: (string | undefined)[] }) {
+function ChatScene({ chat }: { chat: Chat }) {
+  const look = readLook(useApp((s) => s.settings.look));
+  const own = Boolean(chat.bgImageId);
+  return <SceneBackdrop blobId={own ? chat.bgImageId : look.bgImageId} fade={own ? (chat.bgFade ?? 40) : look.bgFade} paper={look.paper} />;
+}
+
+function RpBody({ text, names, chat }: { text: string; names: (string | undefined)[]; chat: Chat }) {
+  const look = readLook(useApp((s) => s.settings.look));
+  const plateOn = typeof chat.textPlate === "boolean" ? chat.textPlate : look.textPlate;
+  const plate = plateOn && Boolean(chat.bgImageId || look.bgImageId);
   const stripped = stripSpeakerPrefix(text, names);
   const { body, status } = stripStatus(stripped);
   const parts = splitDialogue(body);
   return (
     <>
-      <div className="serif-body whitespace-pre-wrap text-[16px] text-narrate">
+      <div
+        className={cn("serif-body whitespace-pre-wrap", plate && "rounded-[16px] px-3 py-2")}
+        style={{
+          fontFamily: fontStack(look.font),
+          fontSize: look.size,
+          fontWeight: look.weight,
+          color: look.narrate,
+          background: plate ? `color-mix(in srgb, ${look.paper} 86%, transparent)` : undefined,
+        }}
+      >
         {parts.map((p, i) => (
-          <span key={i} className={p.kind === "say" ? "font-semibold italic text-ink" : undefined}>
+          <span key={i} style={p.kind === "say" ? { fontStyle: "italic", fontWeight: sayWeight(look.weight), color: look.say } : undefined}>
             {p.text}
           </span>
         ))}

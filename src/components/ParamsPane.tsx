@@ -14,6 +14,8 @@ import { compressRef, isImageFile, naiSeedOf } from "@/lib/ref-image";
 import { getImage, imageUrl } from "@/lib/idb";
 import { insertTag, loadTags, suggestTags, type Tag } from "@/lib/tags";
 import { naiFamily } from "@/lib/nai";
+import { readLook } from "@/lib/look";
+import { SceneBackdrop } from "./LookSheet";
 import { replyStoryText } from "@/lib/reply-markup";
 import {
   FOLLOW_IMAGE_AI,
@@ -160,8 +162,14 @@ export function ParamsPane({ chat, mode = "chat" }: { chat: Chat; mode?: "chat" 
     return () => document.removeEventListener("pointerdown", fn);
   }, [previewOpen]);
 
+  const look = readLook(useApp((s) => s.settings.look));
+  const ownBg = Boolean(chat.bgImageId);
   return (
-    <div className={mode === "pure" ? "mx-auto max-w-lg px-4 pb-10 pt-1" : "mx-auto h-full max-w-lg overflow-y-auto px-4 pb-24 pt-3 scroll-thin"}>
+    <div className="relative h-full">
+      {mode === "chat" ? (
+        <SceneBackdrop blobId={ownBg ? chat.bgImageId : look.bgImageId} fade={ownBg ? (chat.bgFade ?? 40) : look.bgFade} paper={look.paper} />
+      ) : null}
+      <div className={mode === "pure" ? "mx-auto max-w-lg px-4 pb-10 pt-1" : "relative mx-auto h-full max-w-lg overflow-y-auto px-4 pb-24 pt-3 scroll-thin"}>
       {mode === "chat" && (
         <>
           <div className="flex items-start justify-between gap-3">
@@ -653,6 +661,7 @@ export function ParamsPane({ chat, mode = "chat" }: { chat: Chat; mode?: "chat" 
           onInsert={(piece) => patch({ promptMid: appendPrompt(p.promptMid, piece) })}
         />
       )}
+      </div>
     </div>
   );
 }

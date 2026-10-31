@@ -6,6 +6,7 @@ import { listedChats, useApp } from "@/lib/store";
 import { FIELD_LABELS } from "@/lib/prompts";
 import { DEFAULT_STATUS_BAR, defaultImageParams } from "@/lib/constants";
 import type { Chat, MultiMode } from "@/lib/types";
+import { ACCENT, PAPER, accentTone, readLook } from "@/lib/look";
 import { uid } from "@/lib/utils";
 import { ChatPane, CustomPromptModal } from "./ChatPane";
 import { WechatDock } from "./WechatPane";
@@ -36,11 +37,27 @@ function Shell() {
   const editChat = useApp((s) => s.chats.find((c) => c.id === editing));
   const draft = useApp((s) => s.chats.find((c) => c.isDraft && c.id === currentId));
   const theme = useApp((s) => s.settings.theme);
+  const look = readLook(useApp((s) => s.settings.look));
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#1a1714" : "#F3EEE6");
-  }, [theme]);
+    const root = document.documentElement;
+    root.classList.toggle("dark", theme === "dark");
+    const custom = theme !== "dark" && look.paper !== PAPER;
+    if (custom) root.style.setProperty("--color-bg", look.paper);
+    else root.style.removeProperty("--color-bg");
+    if (look.accent !== ACCENT) {
+      const tone = accentTone(look.accent);
+      root.style.setProperty("--color-primary", tone.solid);
+      root.style.setProperty("--color-primary-hover", tone.hover);
+      root.style.setProperty("--color-primary-soft", theme === "dark" ? tone.softDark : tone.soft);
+    } else {
+      root.style.removeProperty("--color-primary");
+      root.style.removeProperty("--color-primary-hover");
+      root.style.removeProperty("--color-primary-soft");
+    }
+    const meta = custom ? look.paper : theme === "dark" ? "#1a1714" : "#F3EEE6";
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", meta);
+  }, [theme, look.paper, look.accent]);
 
   let body: React.ReactNode;
   if (tab === "pure") {

@@ -18,6 +18,8 @@ import { ChatModelSelect } from "./ModelSelect";
 import { Card, ExpandSelect, FieldLabel, GhostBtn, Modal, PrimaryBtn, Switch, TextArea, TextInput, ZoomImg } from "./ui-kit";
 import { LibraryDrawer } from "./LibraryDrawer";
 import { ImagePick } from "./ImagePick";
+import { BgControls, SceneBackdrop } from "./LookSheet";
+import { readLook } from "@/lib/look";
 
 type Busy =
   | null
@@ -267,8 +269,11 @@ export function RoleEditor({ chat, mode }: { chat: Chat; mode: "create" | "edit"
     />
   );
 
+  const look = readLook(useApp((s) => s.settings.look));
   return (
-    <div className="h-full overflow-y-auto px-4 pb-56 pt-3 scroll-thin">
+    <div className="relative h-full">
+      {chat.bgImageId ? <SceneBackdrop blobId={chat.bgImageId} fade={chat.bgFade ?? 40} paper={look.paper} /> : null}
+      <div className="relative h-full overflow-y-auto px-4 pb-72 pt-3 scroll-thin">
       <div className="mb-1 text-[11px] tracking-[0.14em] text-muted">{mode === "create" ? "NEW ROLE" : "EDIT ROLE"}</div>
       <div className="mb-1 flex items-center gap-1">
         <h1 className={`min-w-0 flex-1 truncate whitespace-nowrap font-semibold leading-tight ${mode === "create" ? "text-[15px]" : "text-[20px]"}`}>
@@ -651,7 +656,34 @@ export function RoleEditor({ chat, mode }: { chat: Chat; mode: "create" | "edit"
         </div>
       </Modal>
 
-      <div className="pointer-events-none h-4" />
+      <Card className="mb-3">
+        <FieldLabel
+          hint="只铺在这个聊天的人设、正文和生图参数上。有这张图时，不再用总设置里的图。"
+          right={
+            <button
+              type="button"
+              className={`h-7 rounded-full border px-3 text-[12px] ${(typeof chat.textPlate === "boolean" ? chat.textPlate : look.textPlate) ? "border-primary bg-primary text-on-primary" : "border-line bg-card text-ink"}`}
+              onClick={() => {
+                const on = typeof chat.textPlate === "boolean" ? chat.textPlate : look.textPlate;
+                patch({ textPlate: !on });
+              }}
+            >
+              文本框
+            </button>
+          }
+        >
+          上传自定义背景
+        </FieldLabel>
+        <BgControls
+          blobId={chat.bgImageId}
+          fade={chat.bgFade ?? 40}
+          onId={(id) => patch({ bgImageId: id, bgFade: chat.bgFade ?? 40 })}
+          onClear={() => patch({ bgImageId: undefined, bgFade: undefined })}
+          onFade={(n) => patch({ bgFade: n })}
+        />
+      </Card>
+
+      <div className="pointer-events-none h-16" />
       <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-lg bg-gradient-to-t from-bg via-bg to-transparent px-4 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-4">
         {mode === "create" && !polished && (
           <>
@@ -766,6 +798,7 @@ export function RoleEditor({ chat, mode }: { chat: Chat; mode: "create" | "edit"
           填入
         </PrimaryBtn>
       </Modal>
+      </div>
     </div>
   );
 }

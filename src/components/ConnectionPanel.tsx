@@ -18,13 +18,14 @@ import {
 } from "@/lib/st-preset";
 import { GhostBtn, Modal, PrimaryBtn, Slider, Switch, TextArea, TextInput } from "./ui-kit";
 import { NAI_OFFICIAL_BASE } from "@/lib/nai";
+import { LookSheet } from "./LookSheet";
 
 export function ConnectionPanel() {
   const open = useApp((s) => s.ui.connection);
   const settings = useApp((s) => s.settings);
   const setUI = useApp((s) => s.setUI);
   const [dl, setDl] = useState(false);
-  const [page, setPage] = useState<null | "chat" | "image" | "preset">(null);
+  const [page, setPage] = useState<null | "chat" | "image" | "preset" | "look">(null);
   const llmSettings = useApp((s) => s.ui.llmSettings);
   useEffect(() => {
     if (!open || !llmSettings) return;
@@ -95,6 +96,7 @@ export function ConnectionPanel() {
         <GearRow label="聊天补全 AI" onClick={() => setPage("chat")} />
         <GearRow label="生图 AI" onClick={() => setPage("image")} />
         <GearRow label="预设设置" onClick={() => setPage("preset")} />
+        <GearRow label="字体和背景" onClick={() => setPage("look")} />
       </SheetCard>
       <Modal open={dl} onClose={() => setDl(false)} title="下载存档">
         <p className="mb-4 text-[13px] text-muted">全部含配图。部分配图留下你上传的头像、表情包、收藏和照片，不含生成图。无配图可再次点重生。</p>
@@ -131,6 +133,7 @@ export function ConnectionPanel() {
           {page === "chat" && <ChatAiSheet onClose={() => setPage(null)} />}
           {page === "image" && <ImageAiSheet onClose={() => setPage(null)} />}
           {page === "preset" && <PresetSheet onClose={() => setPage(null)} />}
+          {page === "look" && <LookSheet onClose={() => setPage(null)} />}
         </div>
       )}
     </div>

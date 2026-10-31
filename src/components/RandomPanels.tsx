@@ -1,15 +1,20 @@
 import { useEffect, useRef, useState, type PointerEvent as PE, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, ChevronUp, Copy, MoreHorizontal, Pencil, Plus, Send, Trash2, X } from "lucide-react";
+import { ChevronDown, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useApp } from "@/lib/store";
 import {
   badModuleName,
   bankSwitch,
+  deleteRandomGroup,
   duplicateRandomModule,
   emptyBank,
+  groupDescendants,
   jumpSeq,
   moduleRounds,
   moduleTag,
+  orderedGroups,
+  orderedModules,
+  reviveAppearanceModule,
   seqTurnItem,
   setModulePick,
   setModuleRounds,
@@ -19,15 +24,7 @@ import {
 } from "@/lib/random-prompt";
 import { autoScrollNearEdge, cn, indexFromY, moveId, nearestScroller, uid } from "@/lib/utils";
 import { Switch, TextArea, TextInput } from "./ui-kit";
-
-function copyText(text: string) {
-  const done = () => useApp.getState().toast("已复制");
-  if (navigator.clipboard?.writeText) {
-    void navigator.clipboard.writeText(text).then(done).catch(() => useApp.getState().toast("复制失败"));
-    return;
-  }
-  useApp.getState().toast("复制失败");
-}
+import { ModuleList, PoolTree } from "./random-list";
 
 function Sheet({
   title,
@@ -255,11 +252,20 @@ export function RandomSettings({
   onInsert: (piece: string) => void;
 }) {
   const bank = useApp((s) => s.settings.random) ?? emptyBank();
+  const appearances = useApp((s) => s.appearances);
+  const revived = useRef(false);
   const [tab, setTab] = useState<"mods" | "quick">("mods");
   const [editing, setEditing] = useState<RandomModule | null>(null);
   const [creating, setCreating] = useState(false);
   const [sorting, setSorting] = useState(false);
   const sortDo = useRef({ save: () => {}, cancel: () => {} });
+  useEffect(() => {
+    if (revived.current || !appearances.length) return;
+    revived.current = true;
+    const cur = useApp.getState().settings.random ?? emptyBank();
+    const next = reviveAppearanceModule(cur, appearances);
+    if (next !== cur) saveBank(next);
+  }, [appearances]);
   return (
     <>
       <Sheet
@@ -292,7 +298,7 @@ export function RandomSettings({
             onInsert={onInsert}
           />
         ) : (
-          <QuickPick modules={bank.modules} onInsert={onInsert} />
+          <QuickPick bank={bank} onInsert={onInsert} />
         )}
       </Sheet>
       {creating && (
@@ -300,7 +306,10 @@ export function RandomSettings({
           modules={bank.modules}
           onClose={() => setCreating(false)}
           onSave={(mod) => {
-            saveBank({ ...bank, modules: [...bank.modules, mod] });
+            const cur = useApp.getState().settings.random ?? emptyBank();
+            const siblings = cur.modules.filter((m) => (m.groupId ?? null) === null);
+            const order = siblings.reduce((n, m) => Math.max(n, m.order ?? 0), -1) + 1;
+            saveBank({ ...cur, modules: [...cur.modules, { ...mod, groupId: null, order }] });
             setCreating(false);
           }}
         />
@@ -314,223 +323,6 @@ export function RandomSettings({
         />
       )}
     </>
-  );
-}
-
-function RoundsStep({ rounds, onChange }: { rounds: number; onChange: (n: number) => void }) {
-  return (
-    <span className="inline-flex h-6 shrink-0 items-center gap-1 text-[11px] leading-none text-muted">
-      轮数
-      <span className="inline-flex h-6 items-center rounded-full border border-line bg-card">
-        <button type="button" className="grid h-6 w-5 place-items-center" aria-label="增加轮数" onClick={() => onChange(rounds + 1)}>
-          <ChevronUp className="size-3" />
-        </button>
-        <span className="min-w-4 text-center text-[12px] text-ink tabular-nums">{rounds}</span>
-        <button
-          type="button"
-          className="grid h-6 w-5 place-items-center disabled:opacity-30"
-          aria-label="减少轮数"
-          disabled={rounds <= 1}
-          onClick={() => onChange(rounds - 1)}
-        >
-          <ChevronDown className="size-3" />
-        </button>
-      </span>
-    </span>
-  );
-}
-
-function ModuleList({
-  bank,
-  sortDo,
-  onSorting,
-  onEdit,
-  onCreate,
-  onInsert,
-}: {
-  bank: RandomBank;
-  sortDo: { current: { save: () => void; cancel: () => void } };
-  onSorting: (on: boolean) => void;
-  onEdit: (m: RandomModule) => void;
-  onCreate: () => void;
-  onInsert: (piece: string) => void;
-}) {
-  const [menu, setMenu] = useState<string | null>(null);
-  const ids = bank.modules.map((m) => m.id);
-  const sort = useListSort(ids, true);
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    window.addEventListener("pointerdown", close);
-    return () => window.removeEventListener("pointerdown", close);
-  }, [menu]);
-  useEffect(() => {
-    if (sort.sorting) setMenu(null);
-    onSorting(sort.sorting);
-    sortDo.current = {
-      save: () => {
-        const map = new Map(bank.modules.map((m) => [m.id, m]));
-        const modules = sort.savedOrder().map((id) => map.get(id)).filter((m): m is RandomModule => !!m);
-        for (const m of bank.modules) if (!modules.some((x) => x.id === m.id)) modules.push(m);
-        saveBank({ ...bank, modules });
-        sort.cancel();
-      },
-      cancel: () => sort.cancel(),
-    };
-  }, [sort.sorting, bank, onSorting, sort, sortDo]);
-  const setPick = (mod: RandomModule, pick: RandomModule["pick"]) => {
-    saveBank(setModulePick(bank, mod.id, pick));
-  };
-  const setRounds = (mod: RandomModule, rounds: number) => {
-    saveBank(setModuleRounds(bank, mod.id, rounds));
-  };
-  const shown = sort.order.map((id) => bank.modules.find((m) => m.id === id)).filter((m): m is RandomModule => !!m);
-  return (
-    <div ref={sort.listRef}>
-      {!sort.sorting && (
-        <button
-          type="button"
-          className="mb-3 flex h-11 w-full items-center justify-center gap-1 rounded-full border border-line bg-card text-[14px]"
-          onClick={onCreate}
-        >
-          <Plus className="size-4" /> 添加模块
-        </button>
-      )}
-      {shown.map((mod) => (
-        <div
-          key={mod.id}
-          data-sort-id={mod.id}
-          className={cn(
-            "mb-3 rounded-[18px] border border-line bg-card px-3 py-3 select-none hold-none",
-            sort.dragId === mod.id && "bg-ink/15",
-            !sort.sorting && sort.holdId === mod.id && "bg-ink/8",
-          )}
-          style={{ touchAction: sort.sorting ? "pan-y" : "manipulation" }}
-          onPointerDown={(e) => sort.onRowDown(e, mod.id)}
-          onPointerMove={sort.onRowMove}
-          onContextMenu={(e) => e.preventDefault()}
-        >
-          <div className="flex items-center gap-2">
-            <div className="min-w-0 flex-1 truncate text-[15px] font-medium">
-              {mod.name}
-              <span className="ml-1 text-[12px] font-normal text-muted">({mod.items.length})</span>
-            </div>
-            {sort.sorting ? (
-              <button
-                type="button"
-                className="grid size-8 shrink-0 place-items-center text-muted"
-                aria-label={`拖动${mod.name}`}
-                style={{ touchAction: "none" }}
-                onPointerDown={(e) => sort.onGripDown(e, mod.id)}
-              >
-                <GripBars />
-              </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  data-row-action
-                  className="grid size-8 place-items-center text-muted"
-                  aria-label="插入到正面提示词"
-                  onClick={() => {
-                    onInsert(moduleTag([mod.name]));
-                    useApp.getState().toast("插入成功");
-                  }}
-                >
-                  <Send className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  data-row-action
-                  className="grid size-8 place-items-center text-muted"
-                  aria-label="复制提示词"
-                  onClick={() => copyText(moduleTag([mod.name]))}
-                >
-                  <Copy className="size-4" />
-                </button>
-              </>
-            )}
-          </div>
-          {!sort.sorting && (
-            <div className="mt-2 flex items-center gap-2">
-              <div data-row-action className="flex h-6 shrink-0 rounded-full bg-dim p-0.5 text-[12px]">
-                {(["random", "seq"] as const).map((pick) => (
-                  <button
-                    key={pick}
-                    type="button"
-                    className={`rounded-full px-2.5 leading-5 ${mod.pick === pick ? "bg-card text-ink" : "text-muted"}`}
-                    onClick={() => setPick(mod, pick)}
-                  >
-                    {pick === "random" ? "随机" : "顺序"}
-                  </button>
-                ))}
-              </div>
-              <span data-row-action>
-                <RoundsStep rounds={moduleRounds(mod)} onChange={(n) => setRounds(mod, n)} />
-              </span>
-              <div className="relative ml-auto" data-row-action>
-                <button
-                  type="button"
-                  className="grid size-8 place-items-center text-muted"
-                  aria-label="更多"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setMenu(menu === mod.id ? null : mod.id);
-                  }}
-                >
-                  <MoreHorizontal className="size-4" />
-                </button>
-                {menu === mod.id && (
-                  <div
-                    className="absolute right-0 top-9 z-10 w-28 overflow-hidden rounded-[14px] border border-line bg-card shadow-lg"
-                    onPointerDown={(e) => e.stopPropagation()}
-                  >
-                    <button type="button" className="block w-full px-3 py-2 text-left text-[13px]" onClick={() => { setMenu(null); onEdit(mod); }}>
-                      编辑
-                    </button>
-                    <button
-                      type="button"
-                      className="block w-full px-3 py-2 text-left text-[13px]"
-                      onClick={() => {
-                        setMenu(null);
-                        const copy = duplicateRandomModule(mod, bank.modules);
-                        saveBank({ ...bank, modules: [...bank.modules, copy] });
-                      }}
-                    >
-                      复制
-                    </button>
-                    <button
-                      type="button"
-                      className="block w-full px-3 py-2 text-left text-[13px] text-danger"
-                      onClick={() => {
-                        setMenu(null);
-                        useApp.getState().setUI({
-                          confirm: {
-                            title: "删除模块",
-                            body: `删除「${mod.name}」？里面的项也会一起删掉。`,
-                            danger: true,
-                            onOk: () =>
-                              saveBank({
-                                ...bank,
-                                modules: bank.modules.filter((m) => m.id !== mod.id),
-                                ...(mod.linked === "appearances" ? { appearanceModuleDismissed: true } : {}),
-                              }),
-                          },
-                        });
-                      }}
-                    >
-                      删除
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      ))}
-      {bank.modules.length === 0 && <p className="text-center text-[13px] text-muted">还没有模块</p>}
-    </div>
   );
 }
 
@@ -963,7 +755,7 @@ function dropGroups(groups: string[][], indexes: number[]) {
   };
 }
 
-function QuickPick({ modules, onInsert }: { modules: RandomModule[]; onInsert: (piece: string) => void }) {
+function QuickPick({ bank, onInsert }: { bank: RandomBank; onInsert: (piece: string) => void }) {
   const [picked, setPicked] = useState<string[]>([]);
   const [groups, setGroups] = useState<string[][]>([]);
   const boxRef = useRef<HTMLTextAreaElement>(null);
@@ -1002,22 +794,7 @@ function QuickPick({ modules, onInsert }: { modules: RandomModule[]; onInsert: (
           确定
         </button>
       </div>
-      <div className="mb-5 flex min-h-24 flex-wrap content-start items-start gap-2 rounded-[16px] border border-line p-3">
-        {modules.length === 0 && <span className="text-[13px] text-muted">还没有模块</span>}
-        {modules.map((mod) => {
-          const on = picked.includes(mod.name);
-          return (
-            <button
-              key={mod.id}
-              type="button"
-              className={`self-start rounded-full px-3 py-1.5 text-[13px] leading-5 ${on ? "bg-primary text-on-primary" : "bg-dim text-ink"}`}
-              onClick={() => toggle(mod.name)}
-            >
-              {mod.name}
-            </button>
-          );
-        })}
-      </div>
+      <PoolTree bank={bank} picked={picked} onToggle={toggle} />
       <div className="mb-2 flex items-center justify-between">
         <div className="text-[13px] text-muted">已选择</div>
         <button

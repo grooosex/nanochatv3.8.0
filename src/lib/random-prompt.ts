@@ -17,6 +17,15 @@ export interface RandomItem {
   nameCustom?: boolean;
 }
 
+export interface RandomGroup {
+  id: string;
+  name: string;
+  parentId: string | null;
+  collapsed: boolean;
+  order: number;
+  starred?: boolean;
+}
+
 export interface RandomModule {
   id: string;
   name: string;
@@ -30,6 +39,10 @@ export interface RandomModule {
   hold?: { itemId: string; used: number } | null;
   /** 由角色选择维护。复制出来的没有这个。 */
   linked?: "appearances";
+  /** 空着就是最外层。 */
+  groupId?: string | null;
+  starred?: boolean;
+  order?: number;
 }
 
 export interface RandomBank {
@@ -39,8 +52,11 @@ export interface RandomBank {
   comboLast?: Record<string, string>;
   /** 组合标签各自记「这一项用了几次」。键同上。 */
   comboHold?: Record<string, { itemId: string; used: number }>;
-  /** 用户删掉了自动的「角色」模块。下次新保存角色才再建。 */
+  /** 用户删掉了自动的「角色」模块。下次打开随机设置会在最外层再建。 */
   appearanceModuleDismissed?: boolean;
+  groups?: RandomGroup[];
+  /** 快速配置里模块池的高度。 */
+  poolHeight?: number;
 }
 
 type PromptFields = Pick<ImageParams, "promptFront" | "promptMid" | "promptBack" | "negative">;
@@ -342,8 +358,16 @@ export function parseRandomBank(raw: unknown): RandomBank {
         ...(rounds > 1 ? { rounds } : {}),
         ...(hold ? { hold } : {}),
         ...(m.linked === "appearances" ? { linked: "appearances" as const } : {}),
+        groupId: typeof m.groupId === "string" ? m.groupId : null,
+        ...(m.starred === true ? { starred: true } : {}),
+        order: Number.isFinite(Number(m.order)) ? Number(m.order) : modules.length,
       });
     }
+  }
+  const groups = parseGroups(row.groups);
+  const groupIds = new Set(groups.map((g) => g.id));
+  for (const mod of modules) {
+    if (mod.groupId && !groupIds.has(mod.groupId)) mod.groupId = null;
   }
   const comboLast: Record<string, string> = {};
   if (row.comboLast && typeof row.comboLast === "object") {
@@ -358,13 +382,128 @@ export function parseRandomBank(raw: unknown): RandomBank {
       if (hold) comboHold[k] = hold;
     }
   }
+  const poolHeight = poolHeightOf(row.poolHeight);
   return {
     enabled: row.enabled === true,
     modules,
     comboLast,
     ...(Object.keys(comboHold).length ? { comboHold } : {}),
     ...(row.appearanceModuleDismissed === true ? { appearanceModuleDismissed: true } : {}),
+    ...(groups.length ? { groups } : {}),
+    ...(poolHeight != null ? { poolHeight } : {}),
   };
+}
+
+function poolHeightOf(raw: unknown) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(216, Math.min(1200, Math.round(n)));
+}
+
+function parseGroups(raw: unknown): RandomGroup[] {
+  if (!Array.isArray(raw)) return [];
+  const groups: RandomGroup[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const g = item as Partial<RandomGroup>;
+    if (typeof g.id !== "string" || typeof g.name !== "string" || !g.name.trim()) continue;
+    if (groups.some((x) => x.id === g.id)) continue;
+    groups.push({
+      id: g.id,
+      name: g.name.trim(),
+      parentId: typeof g.parentId === "string" ? g.parentId : null,
+      collapsed: g.collapsed !== false,
+      order: Number.isFinite(Number(g.order)) ? Number(g.order) : groups.length,
+      ...(g.starred === true ? { starred: true } : {}),
+    });
+  }
+  const ids = new Set(groups.map((g) => g.id));
+  for (const g of groups) {
+    if (g.parentId && !ids.has(g.parentId)) g.parentId = null;
+  }
+  const seen = new Set<string>();
+  const clean = (id: string | null): boolean => {
+    if (!id) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    const parent = groups.find((g) => g.id === id)?.parentId ?? null;
+    const ok = clean(parent);
+    seen.delete(id);
+    return ok;
+  };
+  for (const g of groups) {
+    if (!clean(g.id)) g.parentId = null;
+  }
+  return groups;
+}
+
+export function orderedGroups(
+  bank: RandomBank,
+  parentId: string | null,
+  orders?: Record<string, number>,
+  pinStars = true,
+) {
+  return (bank.groups ?? [])
+    .filter((g) => (g.parentId ?? null) === parentId)
+    .sort((a, b) => compareTree(a, b, orders, pinStars));
+}
+
+export function orderedModules(
+  bank: RandomBank,
+  parentId: string | null,
+  orders?: Record<string, number>,
+  pinStars = true,
+) {
+  return bank.modules
+    .filter((m) => (m.groupId ?? null) === parentId)
+    .sort((a, b) => compareTree(a, b, orders, pinStars));
+}
+
+function compareTree(
+  a: { id: string; order?: number; starred?: boolean },
+  b: { id: string; order?: number; starred?: boolean },
+  orders: Record<string, number> | undefined,
+  pinStars: boolean,
+) {
+  if (pinStars && Boolean(a.starred) !== Boolean(b.starred)) return a.starred ? -1 : 1;
+  return (orders?.[a.id] ?? a.order ?? 0) - (orders?.[b.id] ?? b.order ?? 0);
+}
+
+export function groupDescendants(groups: RandomGroup[], id: string) {
+  const out: string[] = [];
+  const walk = (pid: string) => {
+    for (const g of groups) {
+      if (g.parentId !== pid) continue;
+      out.push(g.id);
+      walk(g.id);
+    }
+  };
+  walk(id);
+  return out;
+}
+
+export function deleteRandomGroup(bank: RandomBank, id: string): RandomBank {
+  const drop = new Set([id, ...groupDescendants(bank.groups ?? [], id)]);
+  const hitLinked = bank.modules.some((m) => m.linked === "appearances" && m.groupId && drop.has(m.groupId));
+  return {
+    ...bank,
+    groups: (bank.groups ?? []).filter((g) => !drop.has(g.id)),
+    modules: bank.modules.filter((m) => !(m.groupId && drop.has(m.groupId))),
+    ...(hitLinked ? { appearanceModuleDismissed: true } : {}),
+  };
+}
+
+/** 打开随机设置时调用。联动的「角色」不在了，就在最外层补一份。 */
+export function reviveAppearanceModule(bank: RandomBank | undefined, appearances: AppearanceSnap[]): RandomBank {
+  const base = bank ?? emptyBank();
+  if (base.modules.some((m) => m.linked === "appearances")) return base;
+  const ordered = [...appearances].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  if (!ordered.length) return base;
+  if (base.modules.some((m) => m.name === APPEARANCE_MODULE_NAME)) return base;
+  const siblings = base.modules.filter((m) => (m.groupId ?? null) === null);
+  const order = siblings.reduce((n, m) => Math.max(n, m.order ?? 0), -1) + 1;
+  const mod = { ...fillLinked(blankLinked(), ordered), groupId: null, order };
+  return { ...base, appearanceModuleDismissed: false, modules: [...base.modules, mod] };
 }
 
 function parseHold(raw: unknown): Hold | null {
@@ -472,6 +611,9 @@ export function duplicateRandomModule(mod: RandomModule, modules: RandomModule[]
     pick: mod.pick,
     nextId: null,
     ...(moduleRounds(mod) > 1 ? { rounds: moduleRounds(mod) } : {}),
+    groupId: mod.groupId ?? null,
+    starred: false,
+    order: modules.filter((m) => (m.groupId ?? null) === (mod.groupId ?? null)).reduce((n, m) => Math.max(n, m.order ?? 0), -1) + 1,
     items: mod.items.map((item) => ({
       id: uid("ri_"),
       name: item.name,
