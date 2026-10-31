@@ -45,6 +45,17 @@ export function supportsChars(model: NaiModelId) {
   return f === "v4" || f === "v4.5" || f === "v5";
 }
 
+/** Drop a whole tag that is exactly 1boy. Leaves 1boy inside other words, and leaves character prompts alone. */
+export function stripStandalone1boy(text: string) {
+  const parts = text.split(",");
+  const kept = parts.filter((p) => p.trim().toLowerCase() !== "1boy");
+  if (kept.length === parts.length) return text;
+  return kept
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
 export function joinPrompt(params: ImageParams, grokTail = "") {
   const furry = !!naiMeta(params.model)?.furry;
 

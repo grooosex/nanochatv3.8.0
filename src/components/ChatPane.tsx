@@ -25,6 +25,7 @@ import { cancelWechatImage, paintWechat, lineImages } from "@/lib/wechat";
 import { saveBlob, useApp } from "@/lib/store";
 import { downloadBlob, cn } from "@/lib/utils";
 import { foldWindow, genPhaseLabel, stripStatus } from "@/lib/engine";
+import { presentScene, readScene, writeScene, type AffinityBits, type SceneCard, type StatusLine } from "@/lib/scene-bar";
 import { memoryCaughtUp } from "@/lib/chat-memory";
 import { splitDialogue, stripSpeakerPrefix } from "@/lib/rp-text";
 import { fontStack, readLook, sayWeight } from "@/lib/look";
@@ -453,6 +454,174 @@ function WechatChip({ chatId }: { chatId: string }) {
   );
 }
 
+const SCENE_BOX = "rounded-[16px] border border-line bg-surface/60 px-3.5 py-3 text-[13px] leading-6 text-ink";
+
+function deltaMark(delta: number) {
+  if (delta > 0) return `📈+${delta}`;
+  if (delta < 0) return `📉${delta}`;
+  return "0";
+}
+
+function AffinityFace({ a, lookSay }: { a: AffinityBits; lookSay: string }) {
+  return (
+    <div>
+      <div className="text-[15px] leading-snug">
+        <span className="font-bold">💞好感度:</span>
+        <span className="font-bold" style={{ color: "#d23a3a" }}>
+          {a.value}
+        </span>
+        <span>
+          [{deltaMark(a.delta)}Ⅰ{a.stage}]
+        </span>
+      </div>
+      <div className="mt-1" style={{ color: lookSay, fontWeight: 700, fontStyle: "italic" }}>
+        「{a.quote}」
+      </div>
+    </div>
+  );
+}
+
+function StatusLines({ lines }: { lines: StatusLine[] }) {
+  return (
+    <div className="mt-2 whitespace-pre-wrap">
+      {lines.map((line, i) => (
+        <div key={i}>
+          <span className="font-bold">{line.title}:</span>
+          {line.value}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SceneFace({
+  card,
+  lookSay,
+  statusOn,
+  loveOn,
+}: {
+  card: SceneCard;
+  lookSay: string;
+  statusOn: boolean;
+  loveOn: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const showLove = loveOn && card.affinity;
+  const showStatus = statusOn && card.lines.length > 0;
+  if (!showLove && !showStatus) return null;
+  return (
+    <div className={SCENE_BOX}>
+      {showLove && card.affinity ? <AffinityFace a={card.affinity} lookSay={lookSay} /> : null}
+      {showStatus ? (
+        <>
+          <button type="button" className="flex items-center gap-1 text-[15px] font-bold leading-snug" onClick={() => setOpen((v) => !v)}>
+            <ChevronDown className={cn("size-3.5 shrink-0 transition", open ? "" : "-rotate-90")} />
+            「{card.name || "角色"}」当前的状态
+          </button>
+          {open ? <StatusLines lines={card.lines} /> : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function SceneEditor({
+  cards,
+  lookSay,
+  statusOn,
+  loveOn,
+  onChange,
+}: {
+  cards: SceneCard[];
+  lookSay: string;
+  statusOn: boolean;
+  loveOn: boolean;
+  onChange: (cards: SceneCard[]) => void;
+}) {
+  const patch = (i: number, next: SceneCard) => onChange(cards.map((c, n) => (n === i ? next : c)));
+  const shown = cards
+    .map((card, i) => ({ card, i }))
+    .filter(({ card }) => (loveOn && card.affinity) || (statusOn && card.lines.length > 0));
+  if (!shown.length) return null;
+  return (
+    <div className="mt-3 space-y-2">
+      {shown.map(({ card, i }) => (
+        <div key={i} className={SCENE_BOX}>
+          {loveOn && card.affinity ? (
+            <AffinityEdit
+              a={card.affinity}
+              lookSay={lookSay}
+              onChange={(a) => patch(i, { ...card, affinity: a })}
+            />
+          ) : null}
+          {statusOn && card.lines.length > 0 ? (
+            <div className={loveOn && card.affinity ? "mt-2" : ""}>
+              <div className="text-[15px] font-bold leading-snug">「{card.name || "角色"}」当前的状态</div>
+              {card.lines.map((line, li) => (
+                <label key={li} className="mt-1 flex items-start gap-1">
+                  <span className="shrink-0 font-bold">{line.title}:</span>
+                  <input
+                    value={line.value}
+                    onChange={(e) => {
+                      const lines = card.lines.map((row, n) => (n === li ? { ...row, value: e.target.value } : row));
+                      patch(i, { ...card, lines });
+                    }}
+                    className="min-w-0 flex-1 bg-transparent outline-none"
+                  />
+                </label>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AffinityEdit({
+  a,
+  lookSay,
+  onChange,
+}: {
+  a: AffinityBits;
+  lookSay: string;
+  onChange: (a: AffinityBits) => void;
+}) {
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-1 text-[15px] leading-snug">
+        <span className="font-bold">💞好感度:</span>
+        <input
+          value={String(a.value)}
+          onChange={(e) => onChange({ ...a, value: Number(e.target.value.replace(/[^\d-]/g, "")) || 0 })}
+          className="w-12 bg-transparent font-bold outline-none"
+          style={{ color: "#d23a3a" }}
+        />
+        <span>[</span>
+        <input
+          value={String(a.delta)}
+          onChange={(e) => onChange({ ...a, delta: Number(e.target.value.replace(/[^\d-]/g, "")) || 0 })}
+          className="w-10 bg-transparent outline-none"
+        />
+        <span>Ⅰ</span>
+        <input
+          value={a.stage}
+          onChange={(e) => onChange({ ...a, stage: e.target.value })}
+          className="min-w-0 flex-1 bg-transparent outline-none"
+        />
+        <span>]</span>
+      </div>
+      <textarea
+        value={a.quote}
+        onChange={(e) => onChange({ ...a, quote: e.target.value })}
+        rows={2}
+        className="mt-1 w-full resize-y bg-transparent outline-none"
+        style={{ color: lookSay, fontWeight: 700, fontStyle: "italic" }}
+      />
+    </div>
+  );
+}
+
 function Bubble({
   chat,
   msg,
@@ -468,15 +637,44 @@ function Bubble({
 }) {
   const [edit, setEdit] = useState(false);
   const [text, setText] = useState(msg.content);
+  const [draftCards, setDraftCards] = useState<SceneCard[]>([]);
   const editRef = useRef<HTMLTextAreaElement>(null);
   const generating = msg.role !== "user" && !msg.content;
   const names = [msg.characterName, chat.name, ...chat.characters.map((c) => c.name), "角色"];
+  const look = readLook(useApp((s) => s.settings.look));
+  const person = msg.characterName || chat.characters.find((c) => c.id === msg.characterId)?.name || chat.characters[0]?.name || chat.name || "角色";
+  const statusOn = chat.statusBarOn === true;
+  const loveOn = chat.affectionOn === true;
+  const scene =
+    msg.role === "user"
+      ? { body: msg.content, cards: [] as SceneCard[] }
+      : presentScene(msg.content, { status: statusOn, affection: loveOn }, person);
+  const cards = msg.role === "narrator" ? [] : scene.cards;
   const editingUser = useApp((s) => s.ui.editUserMsg?.msgId === msg.id);
 
   const startAssistEdit = () => {
-    setText(msg.content);
+    const full = readScene(msg.content, person);
+    setText(full.body);
+    setDraftCards(full.cards);
     setEdit(true);
     requestAnimationFrame(() => editRef.current?.focus());
+  };
+  const saveAssistEdit = () => {
+    const nameLine = chat.isMulti && chat.multiMode === "together";
+    void editMessage(chat.id, msg.id, writeScene(text, draftCards, nameLine));
+    if (loveOn) {
+      const next = { ...(chat.affections ?? {}) };
+      for (const card of draftCards) {
+        if (!card.affinity) continue;
+        const who =
+          (msg.characterId && chat.characters.find((c) => c.id === msg.characterId)) ||
+          chat.characters.find((c) => c.name && c.name === card.name) ||
+          (chat.characters.length === 1 ? chat.characters[0] : undefined);
+        if (who) next[who.id] = card.affinity.value;
+      }
+      useApp.getState().patchChat(chat.id, { affections: next });
+    }
+    setEdit(false);
   };
 
   if (msg.role === "user") {
@@ -550,7 +748,16 @@ function Bubble({
             className="serif-body min-h-[120px] w-full resize-y bg-transparent text-[16px] leading-relaxed text-narrate outline-none"
           />
         ) : (
-          <ReplyView text={msg.content} names={names} onUseOption={onUseOption} chat={chat} />
+          <ReplyView text={scene.body} names={names} onUseOption={onUseOption} chat={chat} />
+        )}
+        {edit && (
+          <SceneEditor
+            cards={draftCards}
+            lookSay={look.say}
+            statusOn={statusOn}
+            loveOn={loveOn}
+            onChange={setDraftCards}
+          />
         )}
         {edit ? (
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -564,10 +771,7 @@ function Bubble({
             <button
               type="button"
               className="inline-flex h-7 items-center rounded-full bg-primary px-3 text-[12px] text-on-primary"
-              onClick={() => {
-                void editMessage(chat.id, msg.id, text);
-                setEdit(false);
-              }}
+              onClick={saveAssistEdit}
             >
               保存
             </button>
@@ -579,6 +783,13 @@ function Bubble({
             {!generating && (
               <Mini onClick={startAssistEdit} icon={<Pencil className="size-3" />} label="编辑" />
             )}
+          </div>
+        )}
+        {cards.length > 0 && !edit && (
+          <div className="mt-3 space-y-2">
+            {cards.map((card, i) => (
+              <SceneFace key={i} card={card} lookSay={look.say} statusOn={statusOn} loveOn={loveOn} />
+            ))}
           </div>
         )}
         {(msg.images.length > 0 || (showImageTray && !generating)) && (

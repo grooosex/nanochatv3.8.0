@@ -550,6 +550,16 @@ export function RoleEditor({ chat, mode }: { chat: Chat; mode: "create" | "edit"
         )}
       </Card>
 
+      <Card className="mb-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[13px] font-medium">好感度</div>
+            <div className="mt-0.5 text-[11px] text-muted">关掉就和现在一样。打开后每人单独记一个数，这一轮的结果会带进下一轮。</div>
+          </div>
+          <Switch on={chat.affectionOn === true} onChange={(v) => patch({ affectionOn: v })} />
+        </div>
+      </Card>
+
       <Extras extras={chat.extras} onChange={(extras) => patch({ extras })} />
 
       {mode === "edit" && (

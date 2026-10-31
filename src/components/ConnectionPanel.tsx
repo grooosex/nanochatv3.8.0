@@ -57,6 +57,16 @@ export function ConnectionPanel() {
               label="生图"
             />
             生图
+            <button
+              type="button"
+              className={cn(
+                "rounded-full border px-2.5 py-0.5 text-[12px] leading-none",
+                settings.allowMulti1boy !== false ? "border-primary bg-primary text-on-primary" : "border-line bg-card text-ink",
+              )}
+              onClick={() => useApp.getState().setSettings({ allowMulti1boy: settings.allowMulti1boy === false })}
+            >
+              1boy
+            </button>
           </span>
         }
         onClose={close}

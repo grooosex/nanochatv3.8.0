@@ -204,7 +204,12 @@ describe("systemFor cancel is identical", () => {
     assert.equal(systemFor("field", "hint"), `${FIELD_SYSTEM}\n\nhint`);
     assert.match(systemFor("personalize", "改成病娇"), /【个性化要求·最高优先】/);
     assert.equal(systemFor("personalize", "改成病娇", ""), systemFor("personalize", "改成病娇"));
-    assert.equal(systemFor("memory", "x", "style"), systemFor("memory"));
+    assert.equal(systemFor("memory"), systemFor("memory", "x"));
+    assert.match(systemFor("memory", "x", "文风"), /文风/);
+    assert.match(systemFor("memory", "x", "文风"), /不要选项、不要状态栏/);
+    assert.doesNotMatch(systemFor("memory"), /不要选项/);
+    assert.match(systemFor("field", "hint", "文风"), /不要聊天回复/);
+    assert.doesNotMatch(systemFor("field", "hint"), /不要聊天回复/);
     assert.equal(systemFor("image", "x", "  "), systemFor("image", "x"));
     assert.equal(systemFor("image", "x", "风格"), `${systemFor("image", "x")}\n\n风格`);
   });

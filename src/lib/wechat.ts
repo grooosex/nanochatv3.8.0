@@ -1,7 +1,7 @@
 import { COOLDOWN_MS } from "./constants.ts";
 import { afterPaint, generateNai, imageFailText, makeImageRecord, parseImageTagOutput, writeImageTags } from "./engine.ts";
 import { grokOnce } from "./grok-client.ts";
-import { naiDrawAuth } from "./nai.ts";
+import { naiDrawAuth, stripStandalone1boy } from "./nai.ts";
 import { sanitizeNaiTags, type PresenceUpdate } from "./nai-tags.ts";
 import { replyContextText } from "./reply-markup.ts";
 import { blobDataUrl } from "./ref-image.ts";
@@ -1374,6 +1374,7 @@ export async function paintWechat(
     }
     if (parsedTags && mode === "auto") {
       grokTail = parsedTags.base;
+      if (freshChat.isMulti && settings.allowMulti1boy === false) grokTail = stripStandalone1boy(grokTail);
       charTails = { ...parsedTags.chars };
       if (parsedTags.presence && !wechatIsMulti(freshChat)) {
         const presence = parsedTags.presence;
@@ -1424,6 +1425,7 @@ export async function paintWechat(
       const tags = await writeImageTags(live, "", live.grokModelId, shot, previousWechatPrompt(now, lineId), ac.signal, user?.text || "", cast, wechatRoute(live));
       grokTail = tags.base;
       charTails = tags.chars;
+      if (live.isMulti && useApp.getState().settings.allowMulti1boy === false) grokTail = stripStandalone1boy(grokTail);
       if (tags.presence && !wechatIsMulti(live)) {
         const presence = tags.presence;
         useApp.getState().patchChat(chatId, (ch) => {

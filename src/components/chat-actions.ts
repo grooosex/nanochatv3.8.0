@@ -14,20 +14,20 @@ import {
   parseGroup,
   parseImageTagOutput,
   splitChatPrompt,
-  stripStatus,
   summarizeMemory,
   writeImageTags,
 } from "@/lib/engine";
 import { grokStream } from "@/lib/grok-client";
 import { sanitizeNaiTags, extractGrokTail, type PresenceUpdate } from "@/lib/nai-tags";
-import { naiDrawAuth } from "@/lib/nai";
+import { naiDrawAuth, stripStandalone1boy } from "@/lib/nai";
 import { COOLDOWN_MS } from "@/lib/constants";
 import { useApp } from "@/lib/store";
 import { detachWechat } from "@/lib/wechat";
 import { shotAndResidual, previousRoundImagePrompt, latestUserBefore, standingDirectives, formatUserForChat, OPENING_USER, messageShots, stampShots } from "@/lib/user-markup";
 import { presetStyle } from "@/lib/st-preset";
+import { affinityUpdates } from "@/lib/scene-bar";
+import { chatImageSystem, sceneTail } from "@/lib/prompts";
 import { applySnaps, foldCoveredEnd, memoryCaughtUp, memoryFailReason, pushSnap, rewindSnaps } from "@/lib/chat-memory";
-import { chatImageSystem } from "@/lib/prompts";
 import { resolveImageWrite } from "@/lib/image-ai";
 import type { Chat, ChatMessage, GenImage, ImageGenSource, UserShot } from "@/lib/types";
 import { randomSeed, uid } from "@/lib/utils";
@@ -157,7 +157,6 @@ export async function branchFrom(id: string, msgId: string) {
 }
 
 function applyStream(id: string, placeholder: ChatMessage, full: string, c0: Chat) {
-  const { body, status } = stripStatus(full);
   if (c0.isMulti && c0.multiMode === "group") {
     const parts = parseGroup(full);
     const mapped: ChatMessage[] = parts.map((p, i) => ({
@@ -165,7 +164,7 @@ function applyStream(id: string, placeholder: ChatMessage, full: string, c0: Cha
       role: p.narrator ? "narrator" : "assistant",
       characterName: p.narrator ? undefined : p.name,
       characterId: c0.characters.find((ch) => ch.name === p.name)?.id,
-      content: stripStatus(p.content).body,
+      content: p.content,
       images: [],
       createdAt: Date.now(),
     }));
@@ -177,16 +176,41 @@ function applyStream(id: string, placeholder: ChatMessage, full: string, c0: Cha
       return {
         ...c,
         messages: [...without, ...mapped],
-        statusBar: status || c.statusBar,
       };
     });
   } else {
     patch(id, (c) => ({
       ...c,
-      messages: c.messages.map((m) => (m.id === placeholder.id ? { ...m, content: body } : m)),
-      statusBar: status || c.statusBar,
+      messages: c.messages.map((m) => (m.id === placeholder.id ? { ...m, content: full } : m)),
     }));
   }
+}
+
+function rememberAffinity(id: string, placeholderId: string) {
+  const c = chat(id);
+  if (!c?.affectionOn) return;
+  const mine = c.messages.filter((m) => m.id === placeholderId || m.id.startsWith(placeholderId + "_"));
+  const next = { ...(c.affections ?? {}) };
+  let changed = false;
+  for (const m of mine) {
+    if (m.role !== "assistant") continue;
+    const found = affinityUpdates(m.content);
+    if (!found.length) continue;
+    if (m.characterId && found.length === 1) {
+      next[m.characterId] = found[0].value;
+      changed = true;
+      continue;
+    }
+    for (const item of found) {
+      const who =
+        c.characters.find((ch) => ch.name && item.name && (item.name === ch.name || item.name.includes(ch.name))) ??
+        (c.characters.length === 1 ? c.characters[0] : undefined);
+      if (!who) continue;
+      next[who.id] = item.value;
+      changed = true;
+    }
+  }
+  if (changed) patch(id, (ch) => ({ ...ch, affections: next }));
 }
 
 function ensureWritingImage(id: string, placeholder: ChatMessage) {
@@ -245,6 +269,8 @@ async function runReply(id: string, _userText: string | null, opening: boolean, 
   let raw = "";
   let promptStarted = false;
   let streamFailed = false;
+  const style = presetStyle(useApp.getState().settings, "chat", c0);
+  const post = [style.postHistory, sceneTail(c0)].filter(Boolean).join("\n\n");
   try {
     raw = await grokStream(
       {
@@ -253,7 +279,8 @@ async function runReply(id: string, _userText: string | null, opening: boolean, 
         extraSystem: extra,
         imageSystem: imageInChat ? chatImageSystem(c0, prevScene) : undefined,
         messages: msgs,
-        ...presetStyle(useApp.getState().settings, "chat", c0),
+        ...style,
+        ...(post ? { postHistory: post } : {}),
       },
       (text) => {
         const split = splitChatPrompt(text);
@@ -287,6 +314,8 @@ async function runReply(id: string, _userText: string | null, opening: boolean, 
     aborts.delete(id);
     busy.delete(id);
   }
+
+  rememberAffinity(id, placeholder.id);
 
   const latest = chat(id);
   if (!latest) return;
@@ -400,6 +429,7 @@ export async function attachImage(
         grokTail = parsed.base;
         charTails = keepPresentTails(mapCharTails(c, parsed.chars), parsed.presence);
         applyPresence(id, parsed.presence);
+        if (c.isMulti && useApp.getState().settings.allowMulti1boy === false) grokTail = stripStandalone1boy(grokTail);
       } else if (mode === "same" && prev?.prompt) {
         grokTail = extractGrokTail(prev.prompt, c.imageParams);
         charTails = { ...(prev.charTails || {}) };
@@ -420,6 +450,7 @@ export async function attachImage(
         grokTail = tags.base;
         charTails = keepPresentTails(mapCharTails(live, tags.chars), tags.presence);
         applyPresence(id, tags.presence);
+        if (c.isMulti && useApp.getState().settings.allowMulti1boy === false) grokTail = stripStandalone1boy(grokTail);
       }
     }
     if (!grokTail && !Object.keys(charTails).length) {

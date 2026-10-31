@@ -30,6 +30,7 @@ export function clipMemoryText(text: string): string {
 export function isPlausibleMemory(text: string): boolean {
   const t = text.trim();
   if (t.length < 24) return false;
+  if (/could not be submitted|sensitive words|prohibited use|content policy|usage policy|generative ai/i.test(t)) return false;
   if (/^(好的|收到|ok|done|无|没有|（无）)/i.test(t) && t.length < 80) return false;
   return true;
 }

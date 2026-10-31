@@ -123,6 +123,10 @@ describe("isPlausibleMemory", () => {
     assert.equal(isPlausibleMemory(""), false);
     assert.equal(isPlausibleMemory("好的"), false);
     assert.equal(isPlausibleMemory("他们在雨里进门，外套还湿着，项链没摘。客厅灯没开。后来在沙发上做过。"), true);
+    assert.equal(
+      isPlausibleMemory("The prompt could not be submitted. The prompt contains sensitive words that violate Google's policy."),
+      false,
+    );
   });
 });
 

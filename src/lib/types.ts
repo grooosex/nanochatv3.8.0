@@ -234,6 +234,10 @@ export interface Chat {
   canGen: boolean;
   statusBarOn: boolean;
   statusBar: string;
+  /** 关掉时不进提示词，也不在聊天里显示。 */
+  affectionOn?: boolean;
+  /** 每人当前好感度。关掉开关也不清。 */
+  affections?: Record<string, number>;
   overview: string;
   opening: string;
   extras: ExtraField[];
@@ -427,6 +431,8 @@ export interface Settings {
   naiOfficialConnected?: boolean;
   cooldownUntil: number;
   chatImage: boolean;
+  /** 点亮（默认）多人总提示可以有 1boy。熄灭只扣模型刚写的总提示。 */
+  allowMulti1boy?: boolean;
   /** null/unset = 与聊天一致. Global, not per-chat. */
   imageModelId?: string | null;
   /** Last explicit API pick for 配图 AI; kept at the end of the list on Grok. */

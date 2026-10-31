@@ -467,7 +467,7 @@ export function presetStyle(
   task: string,
   chat?: Chat | null,
 ): { styleExtra?: string; postHistory?: string } {
-  if (task === "image" || task === "memory" || task === "rewrite") return {};
+  if (task === "image" || task === "rewrite") return {};
   const preset = activePreset(settings);
   if (!preset) return {};
   const ctx = macroContext(chat);

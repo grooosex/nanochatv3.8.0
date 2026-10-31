@@ -18,10 +18,6 @@ export const RP_SYSTEM = `你在为用户撰写中文视觉小说式角色扮演
 - 【作者指令】角色永远听不见、不准念出来。只执行与这轮文笔/剧情有关的（详尽、别停、别OOC等）。与画图、镜头、构图、tag 有关的忽略。
 - 只有已发生、没有台词时：只对身体和场面做反应，禁止写成听见一句话。
 
-状态栏：
-- 若设定开启状态栏，在每次回复最末尾另起一段，原样保留各行标题和 emoji，只改冒号后的描述，且必须全中文。
-- 状态栏不要插在正文中间。
-
 人设优先级：要求总览 > 与剧情/写法有关的作者指令 > 本拍已发生事实 > 台词 > 人设/说话方式/新增补丁 > 长期记忆（既成事实）> 默认文风。
 开场：若还没有对话，根据开场场景以角色口吻写出第一句，不要以用户身份说话。`;
 
@@ -34,7 +30,6 @@ export const RP_STRUCTURE = `你在为用户撰写角色扮演对白。这是双
 - 【用户其余原文】要判断：像对角色说的话 → 台词，她听见；像动作/场面 → 与【已发生】同一规则。短动词优先当动作。
 - 【作者指令】角色永远听不见、不准念出来。只执行与这轮文笔/剧情有关的。与画图、镜头、构图、tag 有关的忽略。
 - 只有已发生、没有台词时：只对身体和场面做反应，禁止写成听见一句话。
-- 若设定开启状态栏，在每次回复最末尾另起一段，原样保留各行标题和 emoji，只改冒号后的描述，且必须全中文。状态栏不要插在正文中间。
 - 人设优先级：要求总览 > 与剧情/写法有关的作者指令 > 本拍已发生事实 > 台词 > 人设/说话方式/新增补丁 > 长期记忆（既成事实）> 文风预设。
 - 外貌备忘只用来避免写错发色瞳色体型衣服，不要每句重复。剧情里已经换装、换衣服状态、改发型的，按当前状态写，不要再写回备忘里的旧款。
 - 开场：若还没有对话，根据开场场景以角色口吻写出第一句，不要以用户身份说话。`;
@@ -401,6 +396,10 @@ export const MEMORY_SYSTEM = `把更早的角色扮演对白压成一份「剧�
 若已有上一份备忘，以它为底把新这一截叠上去；冲突以新这一截为准，仍有效的旧事实不要丢。注意这不是补篇、补记或续写，是把上一份备忘和这一截新对白结合成一份完整的剧情备忘(涵盖从第一轮开始的内容)。
 只返回备忘正文。`;
 
+const MEMORY_CLOSER = `上面的预设只用来润色和少被误杀。输出仍然只能是一份中文剧情备忘，不要选项、不要状态栏、不要聊天格式、不要思考过程。`;
+
+const TASK_CLOSER = `上面的预设只用于文风和少被误杀。这一次只改指定的栏，不要聊天回复，不要选项，不要状态栏。`;
+
 export const PROMPT_REWRITE_SYSTEM = `根据对话和上一份提示词，重写一份 NAI 4.5/5 英文 tag。规则同生图写手：先把对白里的主动作写成具体真 tag，空格不分下划线，不写画风画师质量词外貌。成人加强开时写成具体真 tag，不要收成安全词。完全无关的情色不要硬塞。只输出 tag 行，不要解释。`;
 
 export function systemFor(task: string, extra?: string, styleExtra?: string, imageSystem?: string) {
@@ -418,13 +417,13 @@ export function systemFor(task: string, extra?: string, styleExtra?: string, ima
   }
   if (task === "polish") {
     const core = extra ? `${POLISH_SYSTEM}\n\n${extra}` : POLISH_SYSTEM;
-    return style ? `${core}\n\n${style}` : core;
+    return style ? `${core}\n\n${style}\n\n${TASK_CLOSER}` : core;
   }
   if (task === "field") {
     const core = extra ? `${FIELD_SYSTEM}\n\n${extra}` : FIELD_SYSTEM;
-    return style ? `${core}\n\n${style}` : core;
+    return style ? `${core}\n\n${style}\n\n${TASK_CLOSER}` : core;
   }
-  if (task === "memory") return MEMORY_SYSTEM;
+  if (task === "memory") return style ? `${MEMORY_SYSTEM}\n\n${style}\n\n${MEMORY_CLOSER}` : MEMORY_SYSTEM;
   if (task === "rewrite") return PROMPT_REWRITE_SYSTEM;
   if (task === "wechat") {
     const core = extra?.trim() || "你在用手机微信和用户聊天。只返回 JSON。";
@@ -434,7 +433,7 @@ export function systemFor(task: string, extra?: string, styleExtra?: string, ima
     const core = extra
       ? `${POLISH_SYSTEM}\n\n【个性化要求·最高优先】\n${extra}\n没点名的栏仍按完善标准写满并对齐。已填的名字、已填的外貌仍然冻结。`
       : POLISH_SYSTEM;
-    return style ? `${core}\n\n${style}` : core;
+    return style ? `${core}\n\n${style}\n\n${TASK_CLOSER}` : core;
   }
   return RP_SYSTEM;
 }
@@ -443,6 +442,64 @@ export function statusBarFor(chat: Chat): string {
   if (!chat.statusBarOn) return "";
   const name = chat.characters[0]?.name || chat.name || "角色";
   return (chat.statusBar || "").replaceAll("{name}", name);
+}
+
+/** 开关都关着时返回空，调用处不要拼进提示词。 */
+export function sceneTail(chat: Chat): string {
+  const status = chat.statusBarOn === true;
+  const love = chat.affectionOn === true;
+  if (!status && !love) return "";
+  const lines: string[] = [];
+  lines.push("下面只在对应开关打开时才有。预设的结尾格式仍然有效，但不要因此省掉这里。");
+  if (status) {
+    const template = statusBarFor(chat);
+    lines.push(
+      [
+        "状态栏开着。正文和选项都写完，另起一行只写「状态栏:」。这一行只是分界，不要当成条目，也不要写进模板。",
+        "分界之后按模板写。行不增不删，标题和符号原样，只改冒号后面，必须中文。",
+        "以上一轮同一人的状态栏为底。这轮没碰到的保持原样，不许重置。",
+        "头发、里衣、鞋袜从初始来，这轮脱了、拉了、弄脏了就改，没穿回去就保持。",
+        "道具加上了就留着，没明确拿掉不重置。",
+        "部位按这一轮真实碰到的写，没碰到的不编。",
+        "体力按这一轮往下掉。健康状态写现在，缓过来才写回正常。",
+        template ? `模板：\n${template}` : "",
+        chat.isMulti
+          ? chat.multiMode === "group"
+            ? "每人一块，写在这个人的 <<<CHAR>>> 里面。不要另写名字。旁白不要写。"
+            : "每人一块。分界的下一行只写这个人的名字，不要加冒号，这一行不是状态项。"
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+  if (love) {
+    const people = chat.characters
+      .map((c) => {
+        const name = c.name.trim() || "角色";
+        const n = chat.affections?.[c.id];
+        return n == null ? `${name}: 还没有数，这一轮按人设、总览、开场定起点，起点不超过 90` : `${name}: ${n}`;
+      })
+      .join("\n");
+    lines.push(
+      [
+        "好感度开着。每人一个整数，范围 -100 到 100。",
+        "加减只看这个人的人设和这一轮发生了什么，以上一轮的数为底。",
+        "平常 -3 到 +3，平淡可以是 0。踩中这个人的喜好或雷区，-8 到 +8。告白被答应、背叛、她自己要的第一次亲近，-12 到 +12。一轮最多 12。禁止聊两句就满。",
+        "下一轮能走到哪，由改完的数加人设决定。-100 到 -1 戒备厌恶，拒绝亲近。0 到 30 客气，有距离。31 到 60 肯露一点真心。61 到 85 会在意、会吃醋，可以主动靠近。86 到 100 信任。",
+        people ? `当前：\n${people}` : "当前：还没有数，这一轮按人设定起点，起点不超过 90",
+        "格式固定成两行，不要改格式，不要写示例，不要把两行接在一起：",
+        "💞好感度:[当前数值][📈或📉[本轮增减值]Ⅰ[关系阶段]]",
+        "「[按这个人人设写的一两句，写她此刻对你的真实感受或潜台词]」",
+        "上升写 📈+数字，下降写 📉-数字，为零写 0。心里话必须另起一行，用「」框住，行首不要加图标。",
+        status ? "这两行写在这个人那一块里、状态条目的上面。不要写在最后，也不要在模板外再写一块。" : "不要写状态栏。每人只在正文最后写这两行。",
+        chat.isMulti && chat.multiMode === "group" ? "写在各自的 <<<CHAR>>> 里。旁白不要写好感度。" : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+  return lines.join("\n\n");
 }
 
 /** Keep titles, drop filled descriptions — used when regenerating a reply. */
@@ -535,15 +592,12 @@ export function chatContextBlock(chat: Chat, opts?: { regen?: boolean }): string
     .map((e, i) => `新增${i + 1}：${e.body}`)
     .filter((s) => s.length > 4)
     .join("\n");
-  const bar = statusBarFor(chat);
-  const barText = opts?.regen ? statusBarSkeleton(bar) : bar;
   return [
     chat.overview ? `【要求总览】\n${chat.overview}` : "",
     chars,
     chat.opening ? `【开场场景】\n${chat.opening}` : "",
     extras ? `【补丁】\n${extras}` : "",
     chat.memory ? `【长期记忆·既成事实】\n${chat.memory}` : "",
-    chat.statusBarOn ? `【状态栏开启】每轮末尾输出，模板：\n${barText}` : "【状态栏关闭】",
     opts?.regen ? "【重写】这一拍当作第一次写。只根据人设、开场、记忆和到上一句为止的对话往下演。" : "",
     chat.isMulti
       ? `【多人】模式=${chat.multiMode === "group" ? "群聊（角色分头像各说，最后旁白）" : "同聊（一条里写所有在场角色）"}`

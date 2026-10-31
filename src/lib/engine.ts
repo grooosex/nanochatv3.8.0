@@ -224,6 +224,7 @@ export async function summarizeMemory(
     task: "memory",
     grokModelId,
     ...imageWriteFields(s.imageModelId),
+    ...presetStyle(s, "memory", chat),
     params: MEMORY_PARAMS,
     max_tokens: MEMORY_PARAMS.maxTokens,
     messages: [

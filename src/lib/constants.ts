@@ -123,19 +123,16 @@ export const UNCENSORED_TAG = "uncensored,";
 export const FULLBODY_TAG = "1.5::full body,foot::,";
 export const FURRY_TAG = "fur dataset,";
 
-export const DEFAULT_STATUS_BAR = `状态栏:
-👤{name}
-🧣头发:
+export const DEFAULT_STATUS_BAR = `🧣头发:
 👙里衣:
 🧦鞋袜:
-🔮身体改造:无
 🧪身体道具:无
-🍐肛门:粉嫩紧闭，从未被进入，微微收缩着
-🎟嘴巴:小巧粉唇微微张开
+🌼肛门:粉嫩紧闭，从未被进入，微微收缩着
+😘嘴巴:小巧粉唇微微张开
 🌸小穴:粉嫩紧致的处女穴
 🎀其他部位:
 💪🏻体力:精神充沛
-❤️健康状态:正常`;
+🌱健康状态:正常`;
 
 export function joinPromptParts(...parts: string[]) {
   return parts.map((s) => s.trim()).filter(Boolean).join(", ");
